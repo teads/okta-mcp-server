@@ -42,7 +42,12 @@ async def okta_authorisation_flow(server: FastMCP) -> AsyncIterator[OktaAppConte
         manager.clear_tokens()
 
 
-mcp = FastMCP("Okta IDaaS MCP Server", lifespan=okta_authorisation_flow)
+mcp = FastMCP(
+    "Okta IDaaS MCP Server",
+    lifespan=okta_authorisation_flow,
+    host=os.environ.get("FASTMCP_HOST", "127.0.0.1"),
+    port=int(os.environ.get("FASTMCP_PORT", "8000")),
+)
 
 
 def main():
@@ -70,4 +75,5 @@ def main():
     from okta_mcp_server.tools.system_logs import system_logs  # noqa: F401
     from okta_mcp_server.tools.users import users  # noqa: F401
 
-    mcp.run()
+    transport = os.environ.get("MCP_TRANSPORT", "stdio")
+    mcp.run(transport=transport)
