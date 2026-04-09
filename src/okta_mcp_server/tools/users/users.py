@@ -10,11 +10,15 @@ from typing import Optional
 from loguru import logger
 from mcp.server.fastmcp import Context
 
+from okta.models.create_user_request import CreateUserRequest
+from okta.models.update_user_request import UpdateUserRequest
+
 from okta_mcp_server.server import mcp
 from okta_mcp_server.utils.client import get_okta_client
 from okta_mcp_server.utils.elicitation import DeactivateConfirmation, DeleteConfirmation, elicit_or_fallback
 from okta_mcp_server.utils.messages import DEACTIVATE_USER, DELETE_USER
 from okta_mcp_server.utils.pagination import build_query_params, create_paginated_response, paginate_all_results
+from okta_mcp_server.utils.validation import validate_ids
 
 
 @mcp.tool()
@@ -82,7 +86,7 @@ async def list_users(
         query_params = build_query_params(search=search, filter=filter, q=q, after=after, limit=limit)
 
         logger.debug("Calling Okta API to list users")
-        users, response, err = await client.list_users(query_params)
+        users, response, err = await client.list_users(**query_params)
 
         if err:
             logger.error(f"Okta API error while listing users: {err}")
@@ -133,7 +137,7 @@ async def get_user_profile_attributes(ctx: Context = None) -> list:
         client = await get_okta_client(manager)
         logger.debug("Fetching first user to extract profile attributes")
 
-        users, _, err = await client.list_users({"limit": 1})
+        users, _, err = await client.list_users(limit=1)
 
         if err:
             logger.error(f"Okta API error while fetching profile attributes: {err}")
@@ -153,6 +157,7 @@ async def get_user_profile_attributes(ctx: Context = None) -> list:
 
 
 @mcp.tool()
+@validate_ids("user_id")
 async def get_user(user_id: str, ctx: Context = None) -> list:
     """Get a user by ID from the Okta organization
 
@@ -172,7 +177,11 @@ async def get_user(user_id: str, ctx: Context = None) -> list:
         client = await get_okta_client(manager)
         logger.debug(f"Calling Okta API to get user {user_id}")
 
-        user = await client.get_user(user_id)
+        user, _, err = await client.get_user(user_id)
+
+        if err:
+            logger.error(f"Okta API error while getting user {user_id}: {err}")
+            return [f"Error: {err}"]
 
         logger.info(f"Successfully retrieved user: {user.profile.email if hasattr(user, 'profile') else user_id}")
         return [user]
@@ -200,8 +209,8 @@ async def create_user(profile: dict, ctx: Context = None) -> list:
 
     try:
         client = await get_okta_client(manager)
-        # Wrap the profile in a dict with 'profile' key as required by Okta SDK
-        user_data = {"profile": profile}
+        # Wrap the profile in a CreateUserRequest model as required by Okta SDK v3
+        user_data = CreateUserRequest.from_dict({"profile": profile})
         logger.debug("Calling Okta API to create user")
 
         user, _, err = await client.create_user(user_data)
@@ -220,6 +229,7 @@ async def create_user(profile: dict, ctx: Context = None) -> list:
 
 
 @mcp.tool()
+@validate_ids("user_id")
 async def update_user(user_id: str, profile: dict, ctx: Context = None) -> list:
     """Update a user in the Okta organization.
 
@@ -238,7 +248,8 @@ async def update_user(user_id: str, profile: dict, ctx: Context = None) -> list:
 
     try:
         client = await get_okta_client(manager)
-        user_data = {"profile": profile}
+        # Wrap the profile in an UpdateUserRequest model as required by Okta SDK v3
+        user_data = UpdateUserRequest.from_dict({"profile": profile})
         logger.debug(f"Calling Okta API to update user {user_id}")
 
         user, _, err = await client.update_user(user_id, user_data)
@@ -255,6 +266,7 @@ async def update_user(user_id: str, profile: dict, ctx: Context = None) -> list:
 
 
 @mcp.tool()
+@validate_ids("user_id")
 async def deactivate_user(user_id: str, ctx: Context = None) -> list:
     """Deactivates a user from the Okta organization.
 
@@ -287,7 +299,8 @@ async def deactivate_user(user_id: str, ctx: Context = None) -> list:
         client = await get_okta_client(manager)
         logger.debug(f"Calling Okta API to deactivate user {user_id}")
 
-        _, err = await client.deactivate_user(user_id)
+        result = await client.deactivate_user(user_id)
+        err = result[-1]
 
         if err:
             logger.error(f"Okta API error while deactivating user {user_id}: {err}")
@@ -301,6 +314,7 @@ async def deactivate_user(user_id: str, ctx: Context = None) -> list:
 
 
 @mcp.tool()
+@validate_ids("user_id")
 async def delete_deactivated_user(user_id: str, ctx: Context = None) -> list:
     """Delete a user from the Okta organization who has already been deactivated or deprovisioned.
 
@@ -332,7 +346,8 @@ async def delete_deactivated_user(user_id: str, ctx: Context = None) -> list:
         client = await get_okta_client(manager)
         logger.debug(f"Calling Okta API to delete user {user_id}")
 
-        _, err = await client.deactivate_or_delete_user(user_id)
+        result = await client.delete_user(user_id)
+        err = result[-1]
 
         if err:
             logger.error(f"Okta API error while deleting user {user_id}: {err}")
